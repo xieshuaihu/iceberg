@@ -31,13 +31,23 @@ public class SparkWriteRequirements {
 
   private final Distribution distribution;
   private final SortOrder[] ordering;
+  private final int icebergSortOrderId;
   private final long advisoryPartitionSize;
 
   SparkWriteRequirements(
       Distribution distribution, SortOrder[] ordering, long advisoryPartitionSize) {
+    this(distribution, ordering, advisoryPartitionSize, 0);
+  }
+
+  SparkWriteRequirements(
+      Distribution distribution,
+      SortOrder[] ordering,
+      long advisoryPartitionSize,
+      int icebergSortOrder) {
     this.distribution = distribution;
     this.ordering = ordering;
     this.advisoryPartitionSize = advisoryPartitionSize;
+    this.icebergSortOrderId = icebergSortOrder;
   }
 
   public Distribution distribution() {
@@ -55,5 +65,9 @@ public class SparkWriteRequirements {
   public long advisoryPartitionSize() {
     // Spark prohibits requesting a particular advisory partition size without distribution
     return distribution instanceof UnspecifiedDistribution ? 0 : advisoryPartitionSize;
+  }
+
+  public int icebergSortOrderId() {
+    return icebergSortOrderId;
   }
 }

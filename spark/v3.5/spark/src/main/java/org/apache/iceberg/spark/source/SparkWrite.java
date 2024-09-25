@@ -197,6 +197,7 @@ abstract class SparkWrite implements Write, RequiresDistributionAndOrdering {
         format,
         outputSpecId,
         targetFileSize,
+        writeRequirements.icebergSortOrderId(),
         writeSchema,
         dsSchema,
         useFanoutWriter,
@@ -636,6 +637,7 @@ abstract class SparkWrite implements Write, RequiresDistributionAndOrdering {
     private final FileFormat format;
     private final int outputSpecId;
     private final long targetFileSize;
+    private final int outputSortOrderId;
     private final Schema writeSchema;
     private final StructType dsSchema;
     private final boolean useFanoutWriter;
@@ -648,6 +650,7 @@ abstract class SparkWrite implements Write, RequiresDistributionAndOrdering {
         FileFormat format,
         int outputSpecId,
         long targetFileSize,
+        int outputSortOrderId,
         Schema writeSchema,
         StructType dsSchema,
         boolean useFanoutWriter,
@@ -656,6 +659,7 @@ abstract class SparkWrite implements Write, RequiresDistributionAndOrdering {
       this.format = format;
       this.outputSpecId = outputSpecId;
       this.targetFileSize = targetFileSize;
+      this.outputSortOrderId = outputSortOrderId;
       this.writeSchema = writeSchema;
       this.dsSchema = dsSchema;
       this.useFanoutWriter = useFanoutWriter;
@@ -685,6 +689,7 @@ abstract class SparkWrite implements Write, RequiresDistributionAndOrdering {
               .dataSchema(writeSchema)
               .dataSparkType(dsSchema)
               .writeProperties(writeProperties)
+              .dataSortOrder(table.sortOrders().get(outputSortOrderId))
               .build();
 
       if (spec.isUnpartitioned()) {

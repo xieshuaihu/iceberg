@@ -48,7 +48,9 @@ import org.apache.iceberg.util.SnapshotUtil;
 import org.apache.iceberg.util.StructLikeSet;
 import org.apache.iceberg.util.TableScanUtil;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.connector.expressions.SortOrder;
 import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.connector.read.SupportsReportOrdering;
 import org.apache.spark.sql.connector.read.SupportsReportPartitioning;
 import org.apache.spark.sql.connector.read.partitioning.KeyGroupedPartitioning;
 import org.apache.spark.sql.connector.read.partitioning.Partitioning;
@@ -57,7 +59,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 abstract class SparkPartitioningAwareScan<T extends PartitionScanTask> extends SparkScan
-    implements SupportsReportPartitioning {
+    implements SupportsReportPartitioning, SupportsReportOrdering {
 
   private static final Logger LOG = LoggerFactory.getLogger(SparkPartitioningAwareScan.class);
 
@@ -112,6 +114,27 @@ abstract class SparkPartitioningAwareScan<T extends PartitionScanTask> extends S
           table().name());
       return new KeyGroupedPartitioning(groupingKeyTransforms(), taskGroups().size());
     }
+  }
+
+  @Override
+  public SortOrder[] outputOrdering() {
+    final boolean singleFileScan = this.taskGroups.stream().allMatch(t -> t.filesCount() == 1);
+    LOG.info("Reporting single file scan {}", singleFileScan);
+    if (singleFileScan) {
+      final List<Integer> sortIds =
+          this.taskGroups.stream()
+              .flatMap(t -> t.tasks().stream())
+              .map(t -> t.asFileScanTask().file().sortOrderId())
+              .distinct()
+              .collect(Collectors.toList());
+      if (sortIds.size() == 1) {
+        org.apache.iceberg.SortOrder sortOrders = table().sortOrders().get(sortIds.get(0));
+        // LOG.info("Reporting sort order {} for table {}", sortOrders, table().name());
+        LOG.info("Reporting sortId {} sort order {}", sortIds.get(0), table().sortOrders());
+        return Spark3Util.toOrdering(sortOrders);
+      }
+    }
+    return new SortOrder[0];
   }
 
   @Override

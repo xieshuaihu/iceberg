@@ -169,7 +169,12 @@ class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistributionAndOrde
       // broadcast the table metadata as the writer factory will be sent to executors
       Broadcast<Table> tableBroadcast =
           sparkContext.broadcast(SerializableTableWithSize.copyOf(table));
-      return new PositionDeltaWriteFactory(tableBroadcast, command, context, writeProperties);
+      return new PositionDeltaWriteFactory(
+          tableBroadcast,
+          command,
+          table.sortOrders().get(writeRequirements.icebergSortOrderId()),
+          context,
+          writeProperties);
     }
 
     @Override
@@ -345,15 +350,18 @@ class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistributionAndOrde
     private final Broadcast<Table> tableBroadcast;
     private final Command command;
     private final Context context;
+    private final org.apache.iceberg.SortOrder sortOrder;
     private final Map<String, String> writeProperties;
 
     PositionDeltaWriteFactory(
         Broadcast<Table> tableBroadcast,
         Command command,
+        org.apache.iceberg.SortOrder sortOrder,
         Context context,
         Map<String, String> writeProperties) {
       this.tableBroadcast = tableBroadcast;
       this.command = command;
+      this.sortOrder = sortOrder;
       this.context = context;
       this.writeProperties = writeProperties;
     }
@@ -378,6 +386,7 @@ class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistributionAndOrde
           SparkFileWriterFactory.builderFor(table)
               .dataFileFormat(context.dataFileFormat())
               .dataSchema(context.dataSchema())
+              .dataSortOrder(sortOrder)
               .dataSparkType(context.dataSparkType())
               .deleteFileFormat(context.deleteFileFormat())
               .positionDeleteSparkType(context.deleteSparkType())

@@ -21,7 +21,9 @@ package org.apache.iceberg.spark.extensions;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
 import org.apache.iceberg.ParameterizedTestExtension;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.spark.SparkWriteOptions;
@@ -309,5 +311,180 @@ public class TestRequiredDistributionAndOrdering extends ExtensionsTestBase {
         "Row count must match",
         ImmutableList.of(row(7L)),
         sql("SELECT count(*) FROM %s", tableName));
+  }
+
+  @TestTemplate
+  public void testNoSortOrderIdWithDirectWrite() throws NoSuchTableException {
+    sql("CREATE TABLE %s (c1 INT, c2 STRING, c3 STRING) " + "USING iceberg ", tableName);
+
+    List<ThreeColumnRecord> data =
+        ImmutableList.of(
+            new ThreeColumnRecord(1, null, "A"),
+            new ThreeColumnRecord(2, "BBBBBBBBBB", "B"),
+            new ThreeColumnRecord(3, "BBBBBBBBBB", "A"),
+            new ThreeColumnRecord(4, "BBBBBBBBBB", "B"),
+            new ThreeColumnRecord(5, "BBBBBBBBBB", "A"),
+            new ThreeColumnRecord(6, "BBBBBBBBBB", "B"),
+            new ThreeColumnRecord(7, "BBBBBBBBBB", "A"));
+    Dataset<Row> ds = spark.createDataFrame(data, ThreeColumnRecord.class);
+    Dataset<Row> inputDF = ds.coalesce(1);
+
+    inputDF.writeTo(tableName).append();
+
+    assertEquals(
+        "sort_order_id must match",
+        ImmutableList.of(row(0)),
+        sql("SELECT sort_order_id FROM %s.files", tableName));
+  }
+
+  @TestTemplate
+  public void testSortOrderIdWithLocallySortWrite() throws NoSuchTableException {
+    sql("CREATE TABLE %s (c1 INT, c2 STRING, c3 STRING) " + "USING iceberg", tableName);
+
+    List<ThreeColumnRecord> data =
+        ImmutableList.of(
+            new ThreeColumnRecord(7, null, "A"),
+            new ThreeColumnRecord(6, "BBBBBBBBBB", "B"),
+            new ThreeColumnRecord(4, "BBBBBBBBBB", "A"),
+            new ThreeColumnRecord(5, "BBBBBBBBBB", "B"),
+            new ThreeColumnRecord(3, "BBBBBBBBBB", "A"),
+            new ThreeColumnRecord(1, "BBBBBBBBBB", "B"),
+            new ThreeColumnRecord(2, "BBBBBBBBBB", "A"));
+    Dataset<Row> ds = spark.createDataFrame(data, ThreeColumnRecord.class);
+    Dataset<Row> inputDF = ds.coalesce(1);
+
+    sql("ALTER TABLE %s WRITE LOCALLY ORDERED BY c1", tableName);
+
+    inputDF.writeTo(tableName).append();
+
+    List<ThreeColumnRecord> sortedData =
+        data.stream()
+            .sorted(Comparator.comparingInt(ThreeColumnRecord::getC1))
+            .collect(Collectors.toList());
+    assertEquals(
+        "Rows must match",
+        sortedData.stream()
+            .map(d -> row(d.getC1(), d.getC2(), d.getC3()))
+            .collect(Collectors.toList()),
+        sql("SELECT * FROM %s", tableName));
+    assertEquals(
+        "sort_order_id must match",
+        ImmutableList.of(row(1)),
+        sql("SELECT sort_order_id FROM %s.files", tableName));
+  }
+
+  @TestTemplate
+  public void testSortOrderIdWithSortWrite() throws NoSuchTableException {
+    sql("CREATE TABLE %s (c1 INT, c2 STRING, c3 STRING) " + "USING iceberg", tableName);
+
+    List<ThreeColumnRecord> data =
+        ImmutableList.of(
+            new ThreeColumnRecord(7, null, "A"),
+            new ThreeColumnRecord(6, "BBBBBBBBBB", "B"),
+            new ThreeColumnRecord(4, "BBBBBBBBBB", "A"),
+            new ThreeColumnRecord(5, "BBBBBBBBBB", "B"),
+            new ThreeColumnRecord(3, "BBBBBBBBBB", "A"),
+            new ThreeColumnRecord(1, "BBBBBBBBBB", "B"),
+            new ThreeColumnRecord(2, "BBBBBBBBBB", "A"));
+    Dataset<Row> ds = spark.createDataFrame(data, ThreeColumnRecord.class);
+    Dataset<Row> inputDF = ds.coalesce(1);
+
+    sql("ALTER TABLE %s WRITE ORDERED BY c1", tableName);
+
+    inputDF.writeTo(tableName).append();
+
+    List<ThreeColumnRecord> sortedData =
+        data.stream()
+            .sorted(Comparator.comparingInt(ThreeColumnRecord::getC1))
+            .collect(Collectors.toList());
+    assertEquals(
+        "Rows must match",
+        sortedData.stream()
+            .map(d -> row(d.getC1(), d.getC2(), d.getC3()))
+            .collect(Collectors.toList()),
+        sql("SELECT * FROM %s", tableName));
+
+    assertEquals(
+        "sort_order_id must match",
+        ImmutableList.of(row(1)),
+        sql("SELECT sort_order_id FROM %s.files", tableName));
+  }
+
+  @TestTemplate
+  public void testSortOrderIdWithFanoutWrite() throws NoSuchTableException {
+    sql(
+        "CREATE TABLE %s (c1 INT, c2 STRING, c3 STRING) " + "USING iceberg PARTITIONED BY (c3)",
+        tableName);
+
+    List<ThreeColumnRecord> data =
+        ImmutableList.of(
+            new ThreeColumnRecord(7, null, "A"),
+            new ThreeColumnRecord(6, "BBBBBBBBBB", "B"),
+            new ThreeColumnRecord(4, "BBBBBBBBBB", "A"),
+            new ThreeColumnRecord(5, "BBBBBBBBBB", "B"),
+            new ThreeColumnRecord(3, "BBBBBBBBBB", "A"),
+            new ThreeColumnRecord(1, "BBBBBBBBBB", "B"),
+            new ThreeColumnRecord(2, "BBBBBBBBBB", "A"));
+    Dataset<Row> ds = spark.createDataFrame(data, ThreeColumnRecord.class);
+    Dataset<Row> inputDF = ds.coalesce(1);
+
+    sql("ALTER TABLE %s WRITE ORDERED BY c1", tableName);
+
+    inputDF
+        .writeTo(tableName)
+        .option(SparkWriteOptions.DISTRIBUTION_MODE, "none")
+        .option(SparkWriteOptions.FANOUT_ENABLED, "true")
+        .append();
+
+    List<ThreeColumnRecord> sortedData =
+        data.stream()
+            .filter(d -> d.getC3().equals("A"))
+            .sorted(Comparator.comparingInt(ThreeColumnRecord::getC1))
+            .collect(Collectors.toList());
+    assertEquals(
+        "Rows must match",
+        sortedData.stream()
+            .map(d -> row(d.getC1(), d.getC2(), d.getC3()))
+            .collect(Collectors.toList()),
+        sql("SELECT * FROM %s WHERE c3='A'", tableName));
+
+    assertEquals(
+        "sort_order_id must match",
+        ImmutableList.of(row(1), row(1)),
+        sql("SELECT sort_order_id FROM %s.files", tableName));
+  }
+
+  @TestTemplate
+  public void testSortOrderIdWithDisabledDistributionAndOrdering() throws NoSuchTableException {
+    sql("CREATE TABLE %s (c1 INT, c2 STRING, c3 STRING) " + "USING iceberg", tableName);
+
+    List<ThreeColumnRecord> data =
+        ImmutableList.of(
+            new ThreeColumnRecord(7, null, "A"),
+            new ThreeColumnRecord(6, "BBBBBBBBBB", "B"),
+            new ThreeColumnRecord(4, "BBBBBBBBBB", "A"),
+            new ThreeColumnRecord(5, "BBBBBBBBBB", "B"),
+            new ThreeColumnRecord(3, "BBBBBBBBBB", "A"),
+            new ThreeColumnRecord(1, "BBBBBBBBBB", "B"),
+            new ThreeColumnRecord(2, "BBBBBBBBBB", "A"));
+    Dataset<Row> ds = spark.createDataFrame(data, ThreeColumnRecord.class);
+    Dataset<Row> inputDF = ds.coalesce(1);
+
+    sql("ALTER TABLE %s WRITE ORDERED BY c1", tableName);
+
+    inputDF
+        .writeTo(tableName)
+        .option(SparkWriteOptions.USE_TABLE_DISTRIBUTION_AND_ORDERING, "false")
+        .append();
+
+    assertEquals(
+        "Rows must match",
+        data.stream().map(d -> row(d.getC1(), d.getC2(), d.getC3())).collect(Collectors.toList()),
+        sql("SELECT * FROM %s", tableName));
+
+    assertEquals(
+        "sort_order_id must match",
+        ImmutableList.of(row(0)),
+        sql("SELECT sort_order_id FROM %s.files", tableName));
   }
 }

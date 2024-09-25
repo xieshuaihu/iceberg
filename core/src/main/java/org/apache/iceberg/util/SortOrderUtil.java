@@ -37,8 +37,10 @@ public class SortOrderUtil {
 
   private SortOrderUtil() {}
 
-  public static SortOrder buildSortOrder(Table table) {
-    return buildSortOrder(table.schema(), table.spec(), table.sortOrder());
+  public static Pair<SortOrder, Integer> buildSortOrder(Table table) {
+    return Pair.of(
+        buildSortOrder(table.schema(), table.spec(), table.sortOrder()),
+        table.sortOrder().orderId());
   }
 
   // builds a sort order using both the table partition spec and the user supplied sort order
